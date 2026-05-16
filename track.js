@@ -137,30 +137,51 @@ const performUpdate = async () => {
     const spinner = ora('Atualizando sistema...').start();
     try {
         await execAsync(`npm install -g ${REPO_URL}`);
-        spinner.succeed(chalk.green('Sistema atualizado com sucesso! Reinicie o programa.'));
+        spinner.succeed(chalk.green('Sistema atualizado com sucesso! Reinicie o programa para aplicar as mudanças.'));
         process.exit(0);
     } catch (err) {
-        spinner.fail(chalk.red('Falha ao atualizar.'));
+        spinner.fail(chalk.red('Falha ao atualizar. Verifique sua conexão ou se o npm está configurado.'));
         console.log(chalk.dim(`Erro: ${err.message}`));
     }
 };
 
 const checkUpdate = async () => {
     try {
+        const spinner = ora(chalk.dim('Verificando integridade do sistema...')).start();
         const res = await axios.get(REPO_RAW_PACKAGE, { timeout: 5000 });
         const remoteVersion = res.data.version;
+        spinner.stop();
+
         if (remoteVersion !== VERSION) {
             updateAvailable = true;
+            
             console.log(boxen(
-                chalk.yellow.bold('NOVA VERSÃO DISPONÍVEL!') + '\n' +
-                chalk.white(`Versão atual: ${VERSION}`) + '\n' +
-                chalk.green(`Nova versão: ${remoteVersion}`),
-                { padding: 1, borderColor: 'yellow', borderStyle: 'round' }
+                chalk.yellow.bold(' ⚠ ATUALIZAÇÃO DISPONÍVEL ⚠ ') + '\n\n' +
+                chalk.white(`Sua versão: ${VERSION}`) + '\n' +
+                chalk.green(`Versão nova: ${remoteVersion}`) + '\n\n' +
+                chalk.dim('Novas funções foram detectadas no GitHub.'),
+                { padding: 1, borderColor: 'yellow', borderStyle: 'double', title: 'Update System' }
             ));
-            const { update } = await inquirer.prompt([{ type: 'confirm', name: 'update', message: 'Deseja atualizar agora?', default: true }]);
-            if (update) await performUpdate();
+
+            const { update } = await inquirer.prompt([
+                {
+                    type: 'confirm',
+                    name: 'update',
+                    message: 'Deseja baixar a nova versão agora?',
+                    default: true
+                }
+            ]);
+
+            if (update) {
+                await performUpdate();
+            } else {
+                console.log(chalk.yellow('\nℹ Você pode atualizar depois no menu principal.\n'));
+                await new Promise(r => setTimeout(r, 2000));
+            }
         }
-    } catch (err) {}
+    } catch (err) {
+        // Silencioso se falhar
+    }
 };
 
 // --- Tab 1: IP ---
@@ -338,17 +359,17 @@ const toolsTab = async () => {
 // --- Main Loop ---
 
 const main = async () => {
+    while (!currentUser) {
+        await authMenu();
+    }
+
     header();
     await checkUpdate();
     
     while (true) {
-        if (!currentUser) {
-            await authMenu();
-        }
-
         header();
         const choices = ['ABA 1: IP', 'ABA 2: SOCIAL', 'ABA 3: BANCO DE DADOS', 'ABA 4: FERRAMENTAS'];
-        if (updateAvailable) choices.push(chalk.green.bold('ATUALIZAR AGORA'));
+        if (updateAvailable) choices.push(chalk.green.bold('➜ ATUALIZAR AGORA'));
         choices.push('Sair');
 
         const { tab } = await inquirer.prompt([{ type: 'list', name: 'tab', message: 'MENU PRINCIPAL:', choices }]);
@@ -358,7 +379,7 @@ const main = async () => {
         if (tab === 'ABA 2: SOCIAL') await socialTab();
         if (tab === 'ABA 3: BANCO DE DADOS') await databaseTab();
         if (tab === 'ABA 4: FERRAMENTAS') await toolsTab();
-        if (tab.includes('ATUALIZAR AGORA')) await performUpdate();
+        if (typeof tab === 'string' && tab.includes('ATUALIZAR AGORA')) await performUpdate();
     }
 };
 

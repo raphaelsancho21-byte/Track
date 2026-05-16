@@ -136,7 +136,7 @@ const authMenu = async () => {
 const performUpdate = async () => {
     const spinner = ora('Atualizando sistema...').start();
     try {
-        await execAsync(`npm install -g ${REPO_URL}`);
+        await execAsync(`npm install -g ${REPO_URL} --force`);
         spinner.succeed(chalk.green('Sistema atualizado com sucesso! Reinicie o programa para aplicar as mudanças.'));
         process.exit(0);
     } catch (err) {

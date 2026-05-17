@@ -12,15 +12,19 @@ import { promisify } from 'util';
 import net from 'net';
 
 const execAsync = promisify(exec);
-// Database principal para configurações e dados
+// Database principal para configurações e dados locais
 const config = new Conf({ projectName: 'track-cli' });
-// Database exclusivo para usuários (Cadastro/Login)
-const userDb = new Conf({ projectName: 'track-users' });
+
+// --- CONFIGURAÇÃO DE BANCO DE DADOS CENTRALIZADO ---
+// ATENÇÃO: Se você for distribuir este código, lembre-se que o TOKEN dá acesso ao seu repo.
+const DB_TOKEN = "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"; // Coloque seu token aqui para todos usarem o mesmo DB
+const DB_REPO = "raphaelsancho21-byte/track-db"; // Repositório privado central
+const DB_FILE = "users.json";
 
 // --- CONFIGURAÇÃO DE VERSÃO E UPDATE ---
-const VERSION = "1.2.0";
+const VERSION = "1.4.0";
 const REPO_RAW_PACKAGE = "https://raw.githubusercontent.com/raphaelsancho21-byte/Track/main/package.json";
-const REPO_URL = "https://github.com/raphaelsancho21-byte/Track";
+const REPO_URL = "git+https://github.com/raphaelsancho21-byte/Track.git"; // Força o uso de HTTPS em vez de SSH
 
 let updateAvailable = false;
 let currentUser = null;
@@ -61,6 +65,48 @@ const backToMenu = async () => {
     ]);
 };
 
+// --- Funções GitHub DB ---
+
+const fetchRemoteUsers = async () => {
+    try {
+        const url = `https://api.github.com/repos/${DB_REPO}/contents/${DB_FILE}`;
+        const res = await axios.get(url, {
+            headers: { Authorization: `token ${DB_TOKEN}` }
+        });
+        const content = Buffer.from(res.data.content, 'base64').toString();
+        return JSON.parse(content);
+    } catch (err) {
+        if (err.response && err.response.status === 404) return []; // Arquivo não existe ainda
+        console.log(chalk.red('\n✘ Erro de conexão com o banco central. Verifique o Token/Repo no código.'));
+        return [];
+    }
+};
+
+const pushRemoteUsers = async (users) => {
+    const spinner = ora('Sincronizando banco de dados global...').start();
+    try {
+        const url = `https://api.github.com/repos/${DB_REPO}/contents/${DB_FILE}`;
+        let sha;
+        
+        try {
+            const res = await axios.get(url, { headers: { Authorization: `token ${DB_TOKEN}` } });
+            sha = res.data.sha;
+        } catch (e) {}
+
+        const content = Buffer.from(JSON.stringify(users, null, 2)).toString('base64');
+        await axios.put(url, {
+            message: "update users database",
+            content: content,
+            sha: sha
+        }, {
+            headers: { Authorization: `token ${DB_TOKEN}` }
+        });
+        spinner.succeed(chalk.green('Banco de dados sincronizado para todos!'));
+    } catch (err) {
+        spinner.fail(chalk.red('Falha na sincronização global.'));
+    }
+};
+
 // --- Sistema de Autenticação ---
 
 const authMenu = async () => {
@@ -76,7 +122,9 @@ const authMenu = async () => {
 
     if (mode === 'Sair') process.exit(0);
 
-    const users = userDb.get('accounts') || [];
+    const spinner = ora('Acessando banco de dados central...').start();
+    const users = await fetchRemoteUsers();
+    spinner.stop();
 
     if (mode === 'Cadastro') {
         const { newUsername, newPassword } = await inquirer.prompt([
@@ -87,7 +135,7 @@ const authMenu = async () => {
                 validate: (input) => {
                     if (!input) return 'Username não pode ser vazio.';
                     if (users.find(u => u.username.toLowerCase() === input.toLowerCase())) {
-                        return chalk.red('Este username já está em uso! Escolha outro.');
+                        return chalk.red('Este username já está em uso por alguém! Escolha outro.');
                     }
                     return true;
                 }
@@ -104,8 +152,9 @@ const authMenu = async () => {
             password: CryptoJS.SHA256(newPassword).toString(), // Hash para segurança
             createdAt: new Date().toISOString()
         });
-        userDb.set('accounts', users);
-        console.log(chalk.green('\n✔ Cadastro realizado com sucesso! Faça login agora.'));
+        
+        await pushRemoteUsers(users); // Salva no GitHub Central
+        console.log(chalk.green('\n✔ Cadastro global realizado com sucesso! Faça login agora.'));
         await backToMenu();
         return authMenu();
     }
@@ -121,10 +170,10 @@ const authMenu = async () => {
 
         if (user && user.password === hashedPass) {
             currentUser = user.username;
-            console.log(chalk.green(`\n✔ Acesso concedido! Bem-vindo de volta, ${currentUser}.`));
+            console.log(chalk.green(`\n✔ Acesso concedido! Bem-vindo ao sistema, ${currentUser}.`));
             await new Promise(r => setTimeout(r, 1000));
         } else {
-            console.log(chalk.red('\n✘ Username ou Senha incorretos.'));
+            console.log(chalk.red('\n✘ Username ou Senha incorretos no banco central.'));
             await backToMenu();
             return authMenu();
         }
@@ -137,7 +186,12 @@ const performUpdate = async () => {
     const spinner = ora('Atualizando sistema...').start();
     try {
         await execAsync(`npm install -g ${REPO_URL} --force`);
-        spinner.succeed(chalk.green('Sistema atualizado com sucesso! Reinicie o programa para aplicar as mudanças.'));
+        spinner.succeed(chalk.green('Sistema atualizado com sucesso!'));
+        console.log(boxen(
+            chalk.cyan.bold('[SYSTEM-TRACK]') + '\n' +
+            chalk.white('Track baixado com Sucesso!, Escreva ') + chalk.green.bold('track') + chalk.white(' no seu CMD e aproveite.'),
+            { padding: 1, borderColor: 'cyan', borderStyle: 'round', margin: 1 }
+        ));
         process.exit(0);
     } catch (err) {
         spinner.fail(chalk.red('Falha ao atualizar. Verifique sua conexão ou se o npm está configurado.'));
